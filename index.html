@@ -13,7 +13,7 @@
 <!-- 灵犀侧边栏样式 -->
 <link rel="stylesheet" href="css/agent.css?v=20261003">
 <!-- 文内 LUI 样式（划词菜单 / 输入框 / 过程面板 / 决策条） -->
-  <link rel="stylesheet" href="css/lui.css?v=20261125-multi">
+  <link rel="stylesheet" href="css/lui.css?v=20261125-lite2">
   <style>
     .demo-guide{
       position:fixed;left:12px;bottom:12px;z-index:9999;max-width:320px;
@@ -28,11 +28,11 @@
 <body>
   <div class="demo-guide" id="demoGuide">
     <b>选区多意图推荐 Demo</b>
-    复制自 AI 编辑专项交互；默认打开「费用台账」。<br>
-    1) 框选明细区 → 整理/计算/美化<br>
-    2) 框选表头行 → 填表/建表升权<br>
-    3) 框选下方空白 → 建表/模板<br>
-    <span class="muted">停留约 2s 自动展开推荐；#dwell=0 可关</span>
+    默认打开「费用台账」。<br>
+    1) 框选后先出角位 icon；停留约 2s 出<strong>轻量推荐条</strong>（模板/样式/建表等）<br>
+    2) 点「展开」或点 icon → 才进完整输入框+推荐<br>
+    3) 空白区 / 表头 / 明细区推荐类型不同<br>
+    <span class="muted">#dwell=0 可关停留轻量条</span>
   </div>
   <!-- 壳：顶部 doc tab 条（app.js 渲染） -->
   <div id="doc-tab-bar"></div>
@@ -58,8 +58,8 @@
   <script src="js/ribbon-ladder.js"></script>
   <script src="js/editors.js?v=20261125-multi"></script>
   <script src="js/editor-api.js"></script>
-  <script src="js/lui.js?v=20261125-multi"></script>
+  <script src="js/lui.js?v=20261125-lite2"></script>
   <script src="js/home.js"></script>
-  <script src="js/app.js?v=20261125-multi"></script>
+  <script src="js/app.js?v=20261125-lite2"></script>
 </body>
 </html>

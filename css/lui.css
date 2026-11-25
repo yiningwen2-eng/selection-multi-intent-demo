@@ -276,7 +276,48 @@
 .lui-chip[data-type="create_table"] .lui-chip-tag,
 .lui-chip[data-type="fill"] .lui-chip-tag { color: #6b3fa0; background: #f3eefe; }
 .lui-chip[data-type="template"] .lui-chip-tag { color: #0f766e; background: #e6f7f4; }
-.lui-chip[data-type="style"] .lui-chip-tag { color: #9a3412; background: #fff1e8; }
+.lui-chip[data-type="style"] .lui-chip-tag,
+.lui-chip[data-type="format"] .lui-chip-tag { color: #9a3412; background: #fff1e8; }
+.lui-chip[data-type="instruction"] .lui-chip-tag { color: #4b5563; background: #f3f4f6; }
+
+/* 停留主动露出：轻量推荐条（无输入框） */
+.lui-lite-rec {
+  position: fixed; z-index: 10050;
+  display: flex; align-items: center; gap: 6px;
+  padding: 6px 6px 6px 6px;
+  background: #fff; border: 1px solid #e5e7eb; border-radius: 999px;
+  box-shadow: 0 6px 18px rgba(20, 30, 50, .14);
+  max-width: min(520px, calc(100vw - 24px));
+}
+.lui-lite-rec-items { display: flex; align-items: center; gap: 4px; min-width: 0; overflow: hidden; }
+.lui-lite-item {
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 28px; padding: 0 10px 0 6px; border: 0; border-radius: 999px;
+  background: #f7f8fa; cursor: pointer; font: 12px/1 "PingFang SC","Microsoft YaHei",sans-serif;
+  color: #1a1d23; white-space: nowrap; max-width: 160px;
+}
+.lui-lite-item:hover { background: #edf4ff; }
+.lui-lite-type {
+  flex-shrink: 0; height: 18px; padding: 0 6px; border-radius: 9px;
+  font-size: 10px; line-height: 18px; color: #1e5fc7; background: #edf4ff;
+}
+.lui-lite-item[data-type="create_table"] .lui-lite-type,
+.lui-lite-item[data-type="fill"] .lui-lite-type { color: #6b3fa0; background: #f3eefe; }
+.lui-lite-item[data-type="template"] .lui-lite-type { color: #0f766e; background: #e6f7f4; }
+.lui-lite-item[data-type="style"] .lui-lite-type,
+.lui-lite-item[data-type="format"] .lui-lite-type { color: #9a3412; background: #fff1e8; }
+.lui-lite-label { overflow: hidden; text-overflow: ellipsis; }
+.lui-lite-expand {
+  flex-shrink: 0; height: 28px; padding: 0 10px; border: 0; border-radius: 999px;
+  background: #111827; color: #fff; font-size: 12px; cursor: pointer;
+}
+.lui-lite-expand:hover { background: #374151; }
+.lui-lite-toast {
+  position: fixed; left: 50%; bottom: 28px; transform: translateX(-50%);
+  z-index: 10060; display: none; padding: 8px 14px; border-radius: 999px;
+  background: rgba(17,24,39,.92); color: #fff; font-size: 12px;
+}
+.lui-lite-toast.show { display: block; }
 .lui-bar-settings {
   flex-shrink: 0; width: 28px; height: 28px;
   background: var(--kd-color-fill-base);

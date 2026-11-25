@@ -145,6 +145,7 @@
   var cur = null;                              // 当前 { root, tab, editorMain, docEl }
   var menuEl = null, barEl = null;             // 浮层（position:fixed，挂 body）
   var objMenuEl = null, tblBtnEl = null;       // 图片对象菜单 / 表格区选小按钮（同挂 body）
+  var liteRecEl = null;                        // 停留后主动露出的轻量推荐条（无输入框）
   var hoverTipEl = null, settingsEl = null;    // 表格 10 月入口 hovertip / WPS AI 设置 mock
   var hoverTimer = null;
   var barCtx = null;
@@ -184,67 +185,99 @@
     return 'cursor:' + (ctx.a1Start || '');
   }
 
-  /* 选区多意图：内容特征优先，几何规则兜底。contentType=instruction|template|style|create_table|fill */
-  function chipsForContext(ctx) {
+  /* 选区多意图推荐池：contentType=template|style|format|create_table|fill|instruction
+     轻量条优先非指令类型；完整面板可混排，指令只是其中一类 */
+  function recPoolForContext(ctx) {
     if (cur.tab.type !== 'et' || ctx.type !== 'cells') {
-      return ((CHIPS[cur.tab.type] || {})[ctx.type] || (CHIPS[cur.tab.type] || {}).cursor);
+      var legacy = ((CHIPS[cur.tab.type] || {})[ctx.type] || (CHIPS[cur.tab.type] || {}).cursor) || [];
+      return { lite: legacy.slice(0, 3), full: legacy };
     }
     var rg = ctx.range || {};
     var rows = (rg.r2 || 0) - (rg.r1 || 0) + 1;
     var cols = (rg.c2 || 0) - (rg.c1 || 0) + 1;
     var emptyRatio = ctx.emptyRatio == null ? 0 : ctx.emptyRatio;
     var headerLike = !!ctx.headerLike;
+    var lite, full;
 
-    /* 空白区选 / 表头+下方空 → 建表、模板、填表升权（规划需求四） */
     if (emptyRatio >= 0.75) {
-      return [
-        { label: '搭建费用台账', prompt: '按费用台账规范，在选中区域搭建明细表结构并预留录入行', contentType: 'create_table',
-          subs: ['含科目/部门字段', '另起新工作表生成'] },
-        { label: '套用台账模板', prompt: '为选中空白区域套用费用台账模板结构', contentType: 'template',
-          subs: ['报销台账', '库存台账'] },
-        { label: '美化表格', prompt: '美化选中区域', contentType: 'style',
-          subs: ['统一样式', '打印适配'] },
+      lite = [
+        { label: '费用台账模板', short: '模板', contentType: 'template', action: 'apply_template', templateId: 'fee_ledger' },
+        { label: '空白建表明细', short: '建表', contentType: 'create_table', action: 'create_sheet' },
+        { label: '简洁报表样式', short: '样式', contentType: 'style', action: 'apply_style', styleId: 'report_clean' },
       ];
-    }
-    if (headerLike) {
-      return [
-        { label: '按表头续写填表', prompt: '按选中表头字段，向下续写并填充明细行', contentType: 'fill',
-          subs: ['生成 5 行示例', '从粘贴内容录入'] },
-        { label: '做同款新表', prompt: '按当前表头结构，在新工作表生成同款台账', contentType: 'create_table' },
-        { label: '整理数据', prompt: '帮我整理选中的数据', contentType: 'instruction',
+      full = [
+        { label: '费用台账模板', prompt: '', contentType: 'template', action: 'apply_template', templateId: 'fee_ledger',
+          desc: '套用日期/科目/金额/部门结构' },
+        { label: '在此搭建明细表', prompt: '', contentType: 'create_table', action: 'create_sheet',
+          desc: '写入新 Sheet，保留选区位置' },
+        { label: '简洁报表样式', prompt: '', contentType: 'style', action: 'apply_style', styleId: 'report_clean',
+          desc: '表头加粗 + 斑马纹 + 边框' },
+        { label: '用一句话说明需求', prompt: '', contentType: 'instruction', action: 'focus_input',
+          desc: '展开输入框自由描述' },
+      ];
+    } else if (headerLike) {
+      lite = [
+        { label: '按表头填表明细', short: '填表', contentType: 'fill', action: 'fill_down' },
+        { label: '做同款台账表', short: '建表', contentType: 'create_table', action: 'create_sheet' },
+        { label: '表头强调样式', short: '样式', contentType: 'style', action: 'apply_style', styleId: 'header_bold' },
+      ];
+      full = [
+        { label: '按表头向下填表', prompt: '', contentType: 'fill', action: 'fill_down', desc: '生成示例明细行' },
+        { label: '做同款新工作表', prompt: '', contentType: 'create_table', action: 'create_sheet', desc: '复制表头结构到新表' },
+        { label: '表头强调样式', prompt: '', contentType: 'style', action: 'apply_style', styleId: 'header_bold', desc: '加粗表头、冻结首行' },
+        { label: '整理选中数据', prompt: '帮我整理选中的数据', contentType: 'instruction',
           subs: ['批量修改', '删除清理', '录入匹配项'] },
       ];
-    }
-
-    /* 对齐产品推荐规则 v1：整列 / 整行 / 二维区域 */
-    if (cols === 1 && rows >= 2) {
-      return [
+    } else if (cols === 1 && rows >= 2) {
+      lite = [
+        { label: '条件格式·突出异常', short: '格式', contentType: 'format', action: 'apply_format', formatId: 'outlier' },
+        { label: '本列汇总卡片', short: '样式', contentType: 'style', action: 'apply_style', styleId: 'col_summary' },
+        { label: '派生核对表', short: '建表', contentType: 'create_table', action: 'create_sheet' },
+      ];
+      full = [
+        { label: '条件格式·突出异常', prompt: '', contentType: 'format', action: 'apply_format', formatId: 'outlier', desc: '高亮异常值' },
+        { label: '派生核对工作表', prompt: '', contentType: 'create_table', action: 'create_sheet', desc: '按本列生成核对表' },
+        { label: '标记重复项', prompt: '按条件标记数据，找出选中区域中的重复数据并突出显示', contentType: 'instruction' },
+        { label: '整理这一列', prompt: '帮我整理选中的数据', contentType: 'instruction',
+          subs: ['批量修改', '删除清理', '录入匹配项'] },
+      ];
+    } else if (rows === 1 && cols >= 2) {
+      lite = [
+        { label: '行高自适应样式', short: '样式', contentType: 'style', action: 'apply_style', styleId: 'row_fit' },
+        { label: '套用记录卡模板', short: '模板', contentType: 'template', action: 'apply_template', templateId: 'record_card' },
+        { label: '格式刷到下行', short: '格式', contentType: 'format', action: 'apply_format', formatId: 'copy_row' },
+      ];
+      full = [
+        { label: '行高自适应', prompt: '', contentType: 'style', action: 'apply_style', styleId: 'row_fit', desc: '不改数据，只调行高' },
+        { label: '记录卡模板', prompt: '', contentType: 'template', action: 'apply_template', templateId: 'record_card', desc: '单行记录展示结构' },
+        { label: '套用格式到目标行', prompt: '调整选中区域的格式，不改变数据，将选中行的格式套用到目标行', contentType: 'format' },
+        { label: '整理这一行', prompt: '帮我整理选中的数据', contentType: 'instruction',
+          subs: ['插入新行', '删除清理', '调整行顺序'] },
+      ];
+    } else {
+      lite = [
+        { label: '商务明细样式', short: '样式', contentType: 'style', action: 'apply_style', styleId: 'biz_detail' },
+        { label: '按选区建汇总表', short: '建表', contentType: 'create_table', action: 'create_sheet' },
+        { label: '条件格式方案', short: '格式', contentType: 'format', action: 'apply_format', formatId: 'heatmap' },
+      ];
+      full = [
+        { label: '商务明细样式', prompt: '', contentType: 'style', action: 'apply_style', styleId: 'biz_detail',
+          desc: '统一字体、边框、对齐' },
+        { label: '按选区建汇总表', prompt: '', contentType: 'create_table', action: 'create_sheet',
+          desc: '新 Sheet 汇总科目/金额' },
+        { label: '条件格式·热力', prompt: '', contentType: 'format', action: 'apply_format', formatId: 'heatmap',
+          desc: '数值列色阶' },
         { label: '整理数据', prompt: '帮我整理选中的数据', contentType: 'instruction',
           subs: ['批量修改', '删除清理', '录入匹配项'] },
-        { label: '标记高亮', prompt: '按条件标记数据', contentType: 'instruction',
-          subs: ['标记重复项', '标记异常值'] },
         { label: '计算分析', prompt: '分析这部分数据', contentType: 'instruction',
           subs: ['汇总统计', '对比变化', '计算结果'] },
       ];
     }
-    if (rows === 1 && cols >= 2) {
-      return [
-        { label: '整理数据', prompt: '帮我整理选中的数据', contentType: 'instruction',
-          subs: ['插入新行', '删除清理', '调整行顺序'] },
-        { label: '标记高亮', prompt: '按条件标记数据', contentType: 'instruction',
-          subs: ['标记重复项', '标记异常值'] },
-        { label: '调整格式', prompt: '调整选中区域的格式，不改变数据', contentType: 'style',
-          subs: ['调整行高', '套用格式'] },
-      ];
-    }
-    return [
-      { label: '整理数据', prompt: '帮我整理选中的数据', contentType: 'instruction',
-        subs: ['批量修改', '删除清理', '录入匹配项'] },
-      { label: '计算分析', prompt: '分析这部分数据', contentType: 'instruction',
-        subs: ['汇总统计', '对比变化', '计算结果'] },
-      { label: '美化表格', prompt: '美化选中区域', contentType: 'style',
-        subs: ['统一样式', '打印适配'] },
-    ];
+    return { lite: lite, full: full };
+  }
+
+  function chipsForContext(ctx) {
+    return recPoolForContext(ctx).full;
   }
 
   function placeholderFor(ctx) {
@@ -300,7 +333,8 @@
       if (menuEl && !menuEl.contains(e.target)) closeMenu();
       if (barEl && !barEl.contains(e.target) && (!settingsEl || !settingsEl.contains(e.target))) closeBar('blur');
       if (objMenuEl && !objMenuEl.contains(e.target) && !(barEl && barEl.contains(e.target) && barCtx && barCtx.type === 'chart')) closeObjMenu();
-      if (tblBtnEl && !tblBtnEl.contains(e.target)) closeTblBtn();
+      if (tblBtnEl && !tblBtnEl.contains(e.target) && !(liteRecEl && liteRecEl.contains(e.target))) closeTblBtn();
+      if (liteRecEl && !liteRecEl.contains(e.target) && !(tblBtnEl && tblBtnEl.contains(e.target))) closeLiteRec();
       if (settingsEl && !settingsEl.contains(e.target) && (!hoverTipEl || !hoverTipEl.contains(e.target))) closeSettings();
     }, true);
     document.addEventListener('keydown', function (e) {
@@ -397,19 +431,20 @@
     if (tab.type === 'et') setupEtEntryHover(tblBtnEl.querySelector('.lui-et-entry'));
     tblBtnEl.querySelector('.lui-ai-btn').addEventListener('click', function () {
       clearDwellTimer();
+      closeLiteRec();
       var ctx = tab.type === 'wps'
         ? { type: 'table', text: '', blockIdx: bi, start: 0, end: 0,
             tblRange: { r1: rng.r1, c1: rng.c1, r2: rng.r2, c2: rng.c2 }, rect: rect }
         : (Editors.getContext(tab) || fallbackCtx()); // et: 直接取 cells ctx（含 range/a1Start/rect）
-      openBar(ctx, '');
+      openBar(ctx, ''); // 点 icon → 完整输入+推荐
     });
-    /* 组合触发草案：停留 ≥N 秒自动展开输入框+推荐（演示开关 window.DEMO_DWELL_MS，默认 2000） */
-    if (tab.type === 'et') scheduleDwellOpen(tab);
+    /* 停留后主动露出轻量推荐条（无输入框）；点条内项或「展开」才进完整态 */
+    if (tab.type === 'et') scheduleDwellLite(tab);
   };
 
   var dwellTimer = null;
   function clearDwellTimer() { if (dwellTimer) { clearTimeout(dwellTimer); dwellTimer = null; } }
-  function scheduleDwellOpen(tab) {
+  function scheduleDwellLite(tab) {
     clearDwellTimer();
     var ms = window.DEMO_DWELL_MS;
     if (ms == null) ms = 2000;
@@ -425,8 +460,87 @@
       var keyNow = rg.r1 + ':' + rg.c1 + ':' + rg.r2 + ':' + rg.c2;
       if (keyNow !== keyAtSchedule) return;
       var ctx = Editors.getContext(tab);
-      if (ctx && ctx.type === 'cells') openBar(ctx, '');
+      if (ctx && ctx.type === 'cells') showLiteRec(tab, ctx);
     }, ms);
+  }
+
+  function closeLiteRec() {
+    if (liteRecEl) { liteRecEl.remove(); liteRecEl = null; }
+  }
+
+  function showLiteRec(tab, ctx) {
+    closeLiteRec();
+    if (!ctx || ctx.type !== 'cells') return;
+    var pool = recPoolForContext(ctx).lite || [];
+    if (!pool.length) return;
+    var anchor = (tblBtnEl && tblBtnEl.getBoundingClientRect()) || ctx.rect;
+    liteRecEl = el(
+      '<div class="lui-lite-rec" role="listbox" aria-label="选区轻量推荐">' +
+        '<div class="lui-lite-rec-items">' +
+          pool.map(function (it, i) {
+            return '<button type="button" class="lui-lite-item" data-i="' + i + '" data-type="' + esc(it.contentType || '') + '">' +
+              '<span class="lui-lite-type">' + esc(contentTypeTag(it.contentType) || it.short || '') + '</span>' +
+              '<span class="lui-lite-label">' + esc(it.label) + '</span>' +
+            '</button>';
+          }).join('') +
+        '</div>' +
+        '<button type="button" class="lui-lite-expand" title="展开完整推荐与输入">展开</button>' +
+      '</div>');
+    document.body.appendChild(liteRecEl);
+    var left = Math.max(8, Math.min((anchor.left || anchor.right || 0), window.innerWidth - liteRecEl.offsetWidth - 8));
+    var top = (anchor.bottom || 0) + 8;
+    if (top + liteRecEl.offsetHeight > window.innerHeight - 8) top = Math.max(8, (anchor.top || 0) - liteRecEl.offsetHeight - 8);
+    liteRecEl.style.left = left + 'px';
+    liteRecEl.style.top = top + 'px';
+    liteRecEl.addEventListener('mousedown', function (e) { e.preventDefault(); });
+    liteRecEl.querySelector('.lui-lite-expand').addEventListener('click', function () {
+      closeLiteRec();
+      openBar(ctx, '');
+    });
+    Array.prototype.forEach.call(liteRecEl.querySelectorAll('.lui-lite-item'), function (btn) {
+      btn.addEventListener('click', function () {
+        var item = pool[+btn.getAttribute('data-i')];
+        closeLiteRec();
+        adoptRecItem(ctx, item, true); // true=从轻量进入，需要时可展开完整面板
+      });
+    });
+  }
+
+  function adoptRecItem(ctx, item, fromLite) {
+    if (!item) return;
+    var action = item.action || '';
+    /* 非指令类型：轻量点选可直接「应用」示意；需要说清需求时再进完整输入 */
+    if (action === 'apply_template' || action === 'apply_style' || action === 'apply_format' ||
+        action === 'create_sheet' || action === 'fill_down') {
+      if (fromLite) {
+        openBar(ctx, '');
+        var input = barEl && barEl.querySelector('.lui-bar-input');
+        var sendBtn = barEl && barEl.querySelector('.lui-bar-send');
+        if (input) {
+          input.value = item.prompt || ('【' + (contentTypeTag(item.contentType) || '推荐') + '】' + item.label);
+          if (sendBtn) sendBtn.disabled = !input.value.trim();
+        }
+        toastLite('已选「' + item.label + '」· 可改要求后发送，或点发送预览');
+        return;
+      }
+    }
+    if (action === 'focus_input' || item.contentType === 'instruction') {
+      openBar(ctx, item.prompt || '');
+      return;
+    }
+    openBar(ctx, item.prompt || item.label || '');
+  }
+
+  function toastLite(msg) {
+    var t = document.getElementById('lui-lite-toast');
+    if (!t) {
+      t = el('<div id="lui-lite-toast" class="lui-lite-toast"></div>');
+      document.body.appendChild(t);
+    }
+    t.textContent = msg;
+    t.classList.add('show');
+    clearTimeout(toastLite._t);
+    toastLite._t = setTimeout(function () { t.classList.remove('show'); }, 1800);
   }
 
   /* 表格选区/图表切换时清理旧入口、旧草稿和「当前选区已发送」标记。 */
@@ -792,7 +906,9 @@
     if (t === 'create_table') return '建表';
     if (t === 'template') return '模板';
     if (t === 'style') return '样式';
+    if (t === 'format') return '格式';
     if (t === 'fill') return '填表';
+    if (t === 'instruction') return '指令';
     return '';
   }
 
@@ -806,18 +922,30 @@
     Array.prototype.forEach.call(box.querySelectorAll('.lui-chip'), function (chipEl) {
       chipEl.addEventListener('click', function () {
         var chip = chips[+chipEl.getAttribute('data-i')];
+        Array.prototype.forEach.call(box.querySelectorAll('.lui-chip'), function (x) { x.classList.remove('is-open'); });
+        chipEl.classList.add('is-open');
+        var oldSubs = box.querySelector('.lui-sub-list');
+        if (oldSubs) oldSubs.remove();
+        box.classList.remove('is-sub');
+
+        /* 模板/样式/格式/建表：写入类型说明，不假装成一条编辑指令 */
+        if (chip.contentType && chip.contentType !== 'instruction') {
+          var typed = '【' + (contentTypeTag(chip.contentType) || '推荐') + '】' + chip.label +
+            (chip.desc ? ' · ' + chip.desc : '');
+          input.value = chip.prompt || typed;
+          sendBtn.disabled = !String(input.value || '').trim();
+          input.focus();
+          input.setSelectionRange(input.value.length, input.value.length);
+          return;
+        }
+
         var prompt = chip.prompt || chip.label;
         input.value = prompt;
         sendBtn.disabled = false;
         input.focus();
         input.setSelectionRange(input.value.length, input.value.length);
-        Array.prototype.forEach.call(box.querySelectorAll('.lui-chip'), function (x) { x.classList.remove('is-open'); });
-        chipEl.classList.add('is-open');
-        var oldSubs = box.querySelector('.lui-sub-list');
-        if (oldSubs) oldSubs.remove();
-        if (!chip.subs) { box.classList.remove('is-sub'); return; }
+        if (!chip.subs) return;
         box.classList.add('is-sub');
-        /* 二级菜单对齐产品稿：魔法棒图标 + 批量修改/删除清理/录入匹配项 */
         box.insertAdjacentHTML('beforeend', '<div class="lui-sub-list">' +
           chip.subs.map(function (s) {
             return '<button type="button" class="lui-sub-chip" data-s="' + esc(s) + '">' +
@@ -825,7 +953,6 @@
           }).join('') + '</div>');
         Array.prototype.forEach.call(box.querySelectorAll('.lui-sub-chip'), function (subEl) {
           subEl.addEventListener('click', function () {
-            /* 产品规则：一级提示词 + 二级接续 */
             var base = prompt.replace(/[，,]\s*$/, '');
             input.value = base + '，' + subEl.getAttribute('data-s');
             Array.prototype.forEach.call(box.querySelectorAll('.lui-sub-chip'), function (x) { x.classList.remove('is-open'); });
@@ -1247,7 +1374,10 @@
 
   function closeMenu() { if (menuEl) { menuEl.remove(); menuEl = null; } }
   function closeObjMenu() { closeHoverTip(); if (objMenuEl) { objMenuEl.remove(); objMenuEl = null; } }
-  function closeTblBtn() { clearDwellTimer(); closeHoverTip(); if (tblBtnEl) { tblBtnEl.remove(); tblBtnEl = null; } }
+  function closeTblBtn() {
+    clearDwellTimer(); closeLiteRec(); closeHoverTip();
+    if (tblBtnEl) { tblBtnEl.remove(); tblBtnEl = null; }
+  }
   function closeBar(reason) {
     var hadEtBar = !!(barEl && cur && cur.tab.type === 'et');
     if (barEl && cur && cur.tab.type === 'et') {
