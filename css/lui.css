@@ -288,11 +288,28 @@
   background: #fff; border: 1px solid #e5e7eb; border-radius: 999px;
   box-shadow: 0 6px 18px rgba(20, 30, 50, .14);
   max-width: min(560px, calc(100vw - 24px));
-  animation: lui-lite-in .18s ease-out;
+  opacity: 1;
+  transform: scaleX(1);
+  transform-origin: left center;
+  transition: opacity .22s ease, transform .22s ease;
+  animation: lui-lite-in .28s ease-out;
 }
 @keyframes lui-lite-in {
-  from { opacity: .4; transform: scaleX(.72); transform-origin: left center; }
+  from { opacity: 0; transform: scaleX(.86); }
   to { opacity: 1; transform: scaleX(1); }
+}
+.lui-lite-rec.is-fading-out {
+  opacity: 0;
+  transform: scaleX(.9);
+  pointer-events: none;
+  animation: none;
+}
+.lui-tbl-btn.is-fading-in {
+  animation: lui-icon-in .24s ease-out;
+}
+@keyframes lui-icon-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 .lui-lite-logo {
   flex-shrink: 0; width: 28px; height: 28px; border: 0; border-radius: 999px;
@@ -330,24 +347,32 @@
 }
 .lui-lite-toast.show { display: block; }
 
-/* 完整态：常用 / 收藏（壳） */
-.lui-extra-rec {
-  margin-top: 6px; padding: 6px 8px 8px;
-  background: #f8fafc; border: 1px solid #e5e7eb; border-radius: 12px;
+/* 完整态：常用指令在发送钮左侧（二级菜单） */
+.lui-bar-frequent-wrap {
+  position: relative; flex-shrink: 0; align-self: center;
 }
-.lui-extra-tabs { display: flex; gap: 4px; margin-bottom: 6px; }
-.lui-extra-tab {
-  height: 24px; padding: 0 10px; border: 0; border-radius: 999px;
-  background: transparent; color: #6b7280; font-size: 12px; cursor: pointer;
+.lui-bar-frequent {
+  display: inline-flex; align-items: center; gap: 2px;
+  height: 28px; padding: 0 8px; border: 0; border-radius: 999px;
+  background: #f3f4f6; color: #374151; font-size: 12px; cursor: pointer;
 }
-.lui-extra-tab.is-on { background: #fff; color: #111827; box-shadow: 0 1px 2px rgba(0,0,0,.06); }
-.lui-extra-list { display: flex; flex-wrap: wrap; gap: 4px; }
-.lui-extra-item {
-  height: 26px; padding: 0 10px; border-radius: 999px;
-  background: #fff; border: 1px solid #e5e7eb; color: #1f2937; font-size: 12px; cursor: pointer;
+.lui-bar-frequent:hover,
+.lui-bar-frequent-wrap.is-open .lui-bar-frequent { background: #e5e7eb; color: #111827; }
+.lui-frequent-menu {
+  position: absolute; right: 0; bottom: calc(100% + 6px); z-index: 2;
+  min-width: 180px; padding: 6px; border-radius: 10px;
+  background: #fff; border: 1px solid #e5e7eb;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, .12);
 }
-.lui-extra-item:hover { background: #edf4ff; border-color: #bfdbfe; }
-.lui-extra-empty { font-size: 12px; color: #9ca3af; padding: 2px 4px; }
+.lui-frequent-sec {
+  padding: 4px 8px 2px; font-size: 11px; color: #9ca3af;
+}
+.lui-frequent-item {
+  display: block; width: 100%; text-align: left;
+  border: 0; background: transparent; border-radius: 6px;
+  padding: 7px 8px; font-size: 12px; color: #1f2937; cursor: pointer;
+}
+.lui-frequent-item:hover { background: #edf4ff; }
 
 .lui-bar-settings {
   flex-shrink: 0; width: 28px; height: 28px;

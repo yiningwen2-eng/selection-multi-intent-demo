@@ -482,10 +482,34 @@
     }, ms);
   }
 
-  function closeLiteRec(restoreIcon) {
+  function markRecReady() {
+    hasLiteOffered = true;
+    if (tblBtnEl) {
+      var btn = tblBtnEl.querySelector('.lui-et-entry');
+      if (btn) btn.setAttribute('data-rec-ready', '1');
+    }
+  }
+
+  function closeLiteRec(restoreIcon, instant) {
     clearLiteHold();
-    if (liteRecEl) { liteRecEl.remove(); liteRecEl = null; }
-    if (restoreIcon && tblBtnEl) tblBtnEl.style.display = '';
+    if (!liteRecEl) {
+      if (restoreIcon && tblBtnEl) tblBtnEl.style.display = '';
+      return;
+    }
+    var node = liteRecEl;
+    liteRecEl = null;
+    function finish() {
+      if (node && node.parentNode) node.remove();
+      if (restoreIcon && tblBtnEl) {
+        tblBtnEl.style.display = '';
+        tblBtnEl.classList.remove('is-fading-in');
+        void tblBtnEl.offsetWidth;
+        tblBtnEl.classList.add('is-fading-in');
+      }
+    }
+    if (instant) { finish(); return; }
+    node.classList.add('is-fading-out');
+    setTimeout(finish, 220);
   }
 
   function scheduleLiteCollapse(tab, ctx) {
@@ -497,12 +521,8 @@
     liteHoldTimer = setTimeout(function () {
       liteHoldTimer = null;
       if (!liteRecEl || barEl) return;
-      hasLiteOffered = true;
-      closeLiteRec(true); // 收回为 icon
-      if (tblBtnEl) {
-        var btn = tblBtnEl.querySelector('.lui-et-entry');
-        if (btn) btn.setAttribute('data-rec-ready', '1');
-      }
+      markRecReady();
+      closeLiteRec(true); // 淡出收回为 icon
     }, ms);
   }
 
@@ -516,7 +536,7 @@
     if (!litePaused || !liteRecEl) return;
     litePaused = false;
     if (liteRemainMs <= 0) {
-      hasLiteOffered = true;
+      markRecReady();
       closeLiteRec(true);
       return;
     }
@@ -524,20 +544,19 @@
     liteHoldTimer = setTimeout(function () {
       liteHoldTimer = null;
       if (!liteRecEl || barEl) return;
-      hasLiteOffered = true;
+      markRecReady();
       closeLiteRec(true);
-      if (tblBtnEl) {
-        var btn = tblBtnEl.querySelector('.lui-et-entry');
-        if (btn) btn.setAttribute('data-rec-ready', '1');
-      }
     }, liteRemainMs);
   }
 
-  function showLiteRec(tab, ctx) {
-    closeLiteRec(false);
+  function showLiteRec(tab, ctx, opts) {
+    opts = opts || {};
+    closeLiteRec(false, true);
     closeHoverTip();
-    if (!ctx || ctx.type !== 'cells') return;
-    var pool = recPoolForContext(ctx).lite || [];
+    if (!ctx || ctx.type !== 'cells' || barEl) return;
+    var pool = lastLitePool.length && opts.fromHover
+      ? lastLitePool
+      : (recPoolForContext(ctx).lite || []);
     if (!pool.length) return;
     lastLitePool = pool.slice();
     /* 同一载体：隐藏独立 icon，在其位置延展成长条（左侧保留 logo） */
@@ -545,7 +564,7 @@
     if (tblBtnEl) tblBtnEl.style.display = 'none';
     liteRecEl = el(
       '<div class="lui-lite-rec is-morph" role="listbox" aria-label="选区轻量推荐">' +
-        '<button type="button" class="lui-lite-logo" title="展开完整推荐与输入" aria-label="展开">' +
+        '<button type="button" class="lui-lite-logo" title="打开输入框写要求" aria-label="打开输入">' +
           icon('lingxi_logo_m', 16) +
         '</button>' +
         '<div class="lui-lite-rec-items">' +
@@ -556,7 +575,7 @@
             '</button>';
           }).join('') +
         '</div>' +
-        '<button type="button" class="lui-lite-expand" title="展开完整推荐与输入">展开</button>' +
+        '<button type="button" class="lui-lite-expand" title="打开输入框，自己写要求">写要求</button>' +
       '</div>');
     document.body.appendChild(liteRecEl);
     var left = Math.max(8, Math.min((anchor.left || 0), window.innerWidth - liteRecEl.offsetWidth - 8));
@@ -567,8 +586,8 @@
     liteRecEl.addEventListener('mouseenter', pauseLiteCollapse);
     liteRecEl.addEventListener('mouseleave', function () { resumeLiteCollapse(tab, ctx); });
     function goFull(pre) {
-      hasLiteOffered = true;
-      closeLiteRec(false);
+      markRecReady();
+      closeLiteRec(false, true);
       if (pre) adoptRecItem(ctx, pre, true);
       else openBar(ctx, '');
     }
@@ -579,7 +598,9 @@
         goFull(pool[+btn.getAttribute('data-i')]);
       });
     });
-    scheduleLiteCollapse(tab, ctx);
+    /* hover 唤回：不自动再收，或用更长展示；主动延展仍走 5s */
+    if (!opts.fromHover) scheduleLiteCollapse(tab, ctx);
+    else scheduleLiteCollapse(tab, ctx); // 仍可收回，悬停暂停
   }
 
   function adoptRecItem(ctx, item, fromLite) {
@@ -752,16 +773,7 @@
     return '<button type="button" class="lui-ai-btn lui-et-entry" aria-label="选区助手" data-rec-ready="0">' + icon('lingxi_logo_m', 16) + '</button>';
   }
 
-  function entryHoverCopy(anchor) {
-    var ready = hasLiteOffered || (anchor && anchor.getAttribute('data-rec-ready') === '1');
-    if (ready && lastLitePool.length) {
-      var top = lastLitePool[0];
-      var tag = contentTypeTag(top.contentType) || top.short || '推荐';
-      return {
-        title: '展开推荐与输入',
-        desc: tag + ' · ' + top.label + (lastLitePool.length > 1 ? ' 等' : '') + '。点此打开完整面板'
-      };
-    }
+  function entryHoverCopy() {
     return {
       title: '选区助手',
       desc: '选中后，按这块内容给出可做的事（推荐与编辑）'
@@ -789,11 +801,22 @@
       if (hoverTipEl && !hoverTipEl.matches(':hover') && !anchor.matches(':hover')) closeHoverTip();
     }, 200); };
     anchor.addEventListener('mouseenter', function () {
-      if (hoverTimer || hoverTipEl || liteRecEl) return; // 长条展示中不叠 tip
+      if (hoverTimer || hoverTipEl || liteRecEl || barEl) return;
+      var ready = hasLiteOffered || anchor.getAttribute('data-rec-ready') === '1';
+      /* 推荐已出现过：hover 直接唤回推荐长条，不再出 tip */
+      if (ready && cur && cur.tab && cur.tab.type === 'et') {
+        hoverTimer = setTimeout(function () {
+          hoverTimer = null;
+          if (!anchor.isConnected || liteRecEl || barEl) return;
+          var ctx = Editors.getContext(cur.tab);
+          if (ctx && ctx.type === 'cells') showLiteRec(cur.tab, ctx, { fromHover: true });
+        }, 280);
+        return;
+      }
       hoverTimer = setTimeout(function () {
         hoverTimer = null;
-        if (!anchor.isConnected || liteRecEl) return;
-        var copy = entryHoverCopy(anchor);
+        if (!anchor.isConnected || liteRecEl || barEl) return;
+        var copy = entryHoverCopy();
         hoverTipEl = el('<div class="lui-entry-tip" role="tooltip">' +
           '<div class="lui-entry-tip-title">' + esc(copy.title) + '</div>' +
           '<div class="lui-entry-tip-desc">' + esc(copy.desc) + '</div>' +
@@ -811,7 +834,10 @@
         hoverTipEl.querySelector('[data-open-et-settings]').addEventListener('click', function () { showEtSettings(); });
       }, 500);
     });
-    anchor.addEventListener('mouseleave', scheduleClose);
+    anchor.addEventListener('mouseleave', function () {
+      if (hoverTimer) { clearTimeout(hoverTimer); hoverTimer = null; }
+      scheduleClose();
+    });
   }
 
   function setupEtSettingsHover(anchor) {
@@ -933,12 +959,28 @@
     }
     clearDwellTimer();
     clearLiteHold();
-    closeLiteRec(false);
+    closeLiteRec(false, true);
     var chips = opts.bare ? null : chipsForContext(ctx);
     if (chips && !chips.length) chips = null;
-    var showExtras = cur.tab.type === 'et' && ctx.type === 'cells' && !opts.bare;
+    var showFrequent = cur.tab.type === 'et' && ctx.type === 'cells' && !opts.bare;
     var etSettingsButton = cur.tab.type === 'et'
       ? '<button type="button" class="lui-bar-settings" aria-label="WPS AI 设置">' + icon('setup', 16) + '</button>' : '';
+    var frequentBtn = showFrequent
+      ? '<div class="lui-bar-frequent-wrap">' +
+          '<button type="button" class="lui-bar-frequent" aria-haspopup="menu" aria-expanded="false" title="常用指令">' +
+            '常用' + icon('arrow_down_s', 12) +
+          '</button>' +
+          '<div class="lui-frequent-menu" role="menu" hidden>' +
+            '<div class="lui-frequent-sec">常用</div>' +
+            '<button type="button" class="lui-frequent-item" data-p="帮我整理选中的数据">整理选中数据</button>' +
+            '<button type="button" class="lui-frequent-item" data-p="按条件标记数据，找出选中区域中的异常值并突出显示">按条件高亮异常</button>' +
+            '<button type="button" class="lui-frequent-item" data-p="对选中列做汇总统计，给出合计与均值">汇总本列数值</button>' +
+            '<div class="lui-frequent-sec">收藏</div>' +
+            '<button type="button" class="lui-frequent-item" data-p="【模板】费用台账模板">套用费用台账模板</button>' +
+            '<button type="button" class="lui-frequent-item" data-p="【样式】表头强调样式 · 加粗表头、冻结首行">表头强调样式</button>' +
+          '</div>' +
+        '</div>'
+      : '';
     barEl = el(
       '<div class="lui-bar">' +
         '<div class="lui-bar-card">' +
@@ -946,19 +988,10 @@
             ? '<button type="button" class="lui-bar-back" title="返回">' + icon('arrow_left_s', 16) + '</button>'
             : '') +
           '<textarea class="lui-bar-input" rows="1" placeholder="' + esc(placeholderFor(ctx)) + '" spellcheck="false"></textarea>' +
+          frequentBtn +
           '<button type="button" class="lui-bar-send" title="发送" aria-label="发送" disabled>' + icon('paper_plane', 16) + '</button>' +
         '</div>' +
         (chips || etSettingsButton ? '<div class="lui-chips-row">' + (chips ? '<div class="lui-chips"></div>' : '<div></div>') + etSettingsButton + '</div>' : '') +
-        (showExtras
-          ? '<div class="lui-extra-rec" data-panel="frequent">' +
-              '<div class="lui-extra-tabs">' +
-                '<button type="button" class="lui-extra-tab is-on" data-tab="frequent">常用</button>' +
-                '<button type="button" class="lui-extra-tab" data-tab="favorite">收藏</button>' +
-              '</div>' +
-              '<div class="lui-extra-list" data-list="frequent"></div>' +
-              '<div class="lui-extra-list" data-list="favorite" hidden></div>' +
-            '</div>'
-          : '') +
       '</div>');
     document.body.appendChild(barEl);
     if (opts.cover) placeCover(barEl, opts.cover);
@@ -997,7 +1030,7 @@
     sendBtn.addEventListener('click', function () { if (input.value.trim()) submit(ctx, input.value.trim()); });
 
     if (chips) paintChips(barEl.querySelector('.lui-chips'), chips, ctx, input, sendBtn);
-    if (showExtras) paintExtraRec(barEl.querySelector('.lui-extra-rec'), ctx, input, sendBtn);
+    wireFrequentMenu(barEl, input, sendBtn);
     var settingsBtn = barEl.querySelector('.lui-bar-settings');
     if (settingsBtn) {
       setupEtSettingsHover(settingsBtn);
@@ -1005,44 +1038,37 @@
     }
   }
 
-  function paintExtraRec(box, ctx, input, sendBtn) {
-    if (!box) return;
-    var frequent = [
-      { label: '整理选中数据', prompt: '帮我整理选中的数据' },
-      { label: '按条件高亮异常', prompt: '按条件标记数据，找出选中区域中的异常值并突出显示' },
-      { label: '汇总本列数值', prompt: '对选中列做汇总统计，给出合计与均值' }
-    ];
-    var favorite = [
-      { label: '套用费用台账模板', prompt: '【模板】费用台账模板' },
-      { label: '表头强调样式', prompt: '【样式】表头强调样式 · 加粗表头、冻结首行' }
-    ];
-    function fill(listName, items) {
-      var list = box.querySelector('[data-list="' + listName + '"]');
-      if (!list) return;
-      list.innerHTML = items.map(function (it, i) {
-        return '<button type="button" class="lui-extra-item" data-i="' + i + '">' + esc(it.label) + '</button>';
-      }).join('') || '<span class="lui-extra-empty">暂无，用过后会出现在这里</span>';
-      Array.prototype.forEach.call(list.querySelectorAll('.lui-extra-item'), function (btn) {
-        btn.addEventListener('click', function () {
-          var it = items[+btn.getAttribute('data-i')];
-          input.value = it.prompt || it.label;
-          sendBtn.disabled = !input.value.trim();
-          input.focus();
-          input.setSelectionRange(input.value.length, input.value.length);
-        });
-      });
+  function wireFrequentMenu(root, input, sendBtn) {
+    var wrap = root.querySelector('.lui-bar-frequent-wrap');
+    if (!wrap) return;
+    var btn = wrap.querySelector('.lui-bar-frequent');
+    var menu = wrap.querySelector('.lui-frequent-menu');
+    function closeMenu() {
+      menu.hidden = true;
+      btn.setAttribute('aria-expanded', 'false');
+      wrap.classList.remove('is-open');
     }
-    fill('frequent', frequent);
-    fill('favorite', favorite);
-    Array.prototype.forEach.call(box.querySelectorAll('.lui-extra-tab'), function (tab) {
-      tab.addEventListener('click', function () {
-        Array.prototype.forEach.call(box.querySelectorAll('.lui-extra-tab'), function (x) { x.classList.remove('is-on'); });
-        tab.classList.add('is-on');
-        var name = tab.getAttribute('data-tab');
-        Array.prototype.forEach.call(box.querySelectorAll('.lui-extra-list'), function (list) {
-          list.hidden = list.getAttribute('data-list') !== name;
-        });
+    function openMenu() {
+      menu.hidden = false;
+      btn.setAttribute('aria-expanded', 'true');
+      wrap.classList.add('is-open');
+    }
+    btn.addEventListener('click', function (e) {
+      e.stopPropagation();
+      if (menu.hidden) openMenu(); else closeMenu();
+    });
+    Array.prototype.forEach.call(menu.querySelectorAll('.lui-frequent-item'), function (item) {
+      item.addEventListener('click', function () {
+        input.value = item.getAttribute('data-p') || item.textContent;
+        sendBtn.disabled = !input.value.trim();
+        input.focus();
+        input.setSelectionRange(input.value.length, input.value.length);
+        closeMenu();
       });
+    });
+    document.addEventListener('mousedown', function onDoc(e) {
+      if (!root.isConnected) { document.removeEventListener('mousedown', onDoc); return; }
+      if (!wrap.contains(e.target)) closeMenu();
     });
   }
 
