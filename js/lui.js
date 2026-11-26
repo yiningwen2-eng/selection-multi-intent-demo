@@ -145,8 +145,14 @@
   var cur = null;                              // 当前 { root, tab, editorMain, docEl }
   var menuEl = null, barEl = null;             // 浮层（position:fixed，挂 body）
   var objMenuEl = null, tblBtnEl = null;       // 图片对象菜单 / 表格区选小按钮（同挂 body）
-  var liteRecEl = null;                        // 停留后主动露出的轻量推荐条（无输入框）
-  var hoverTipEl = null, settingsEl = null;    // 表格 10 月入口 hovertip / WPS AI 设置 mock
+  var liteRecEl = null;                        // icon 延展后的轻量推荐长条（与 icon 互斥）
+  var liteHoldTimer = null;                    // 长条自动收回计时
+  var litePaused = false;                      // 悬停长条时暂停收回
+  var liteRemainMs = 0;                        // 暂停时剩余毫秒
+  var liteHoldStartedAt = 0;
+  var hasLiteOffered = false;                  // 本选区是否已主动延展过（收回后不再自动展）
+  var lastLitePool = [];                       // 供收回后 hover tip 预览
+  var hoverTipEl = null, settingsEl = null;    // 表格入口 hovertip / WPS AI 设置 mock
   var hoverTimer = null;
   var barCtx = null;
   var caretEl = null;                          // 光标态唤起时的闪烁光标标记（告诉用户从哪唤起）
@@ -431,21 +437,33 @@
     if (tab.type === 'et') setupEtEntryHover(tblBtnEl.querySelector('.lui-et-entry'));
     tblBtnEl.querySelector('.lui-ai-btn').addEventListener('click', function () {
       clearDwellTimer();
-      closeLiteRec();
+      clearLiteHold();
+      closeLiteRec(false);
       var ctx = tab.type === 'wps'
         ? { type: 'table', text: '', blockIdx: bi, start: 0, end: 0,
             tblRange: { r1: rng.r1, c1: rng.c1, r2: rng.r2, c2: rng.c2 }, rect: rect }
-        : (Editors.getContext(tab) || fallbackCtx()); // et: 直接取 cells ctx（含 range/a1Start/rect）
-      openBar(ctx, ''); // 点 icon → 完整输入+推荐
+        : (Editors.getContext(tab) || fallbackCtx());
+      openBar(ctx, ''); // 点 icon → 完整输入+推荐+常用/收藏
     });
-    /* 停留后主动露出轻量推荐条（无输入框）；点条内项或「展开」才进完整态 */
+    /* 推荐就绪后：icon 延展为轻量长条；展示约 5s 收回 icon；同选区不自动再展 */
     if (tab.type === 'et') scheduleDwellLite(tab);
   };
 
   var dwellTimer = null;
   function clearDwellTimer() { if (dwellTimer) { clearTimeout(dwellTimer); dwellTimer = null; } }
+  function clearLiteHold() {
+    if (liteHoldTimer) { clearTimeout(liteHoldTimer); liteHoldTimer = null; }
+    litePaused = false; liteRemainMs = 0; liteHoldStartedAt = 0;
+  }
+  function holdMs() {
+    var ms = window.DEMO_LITE_HOLD_MS;
+    if (ms == null) ms = 5000;
+    return Math.max(0, ms);
+  }
   function scheduleDwellLite(tab) {
     clearDwellTimer();
+    clearLiteHold();
+    if (hasLiteOffered) return; // 本选区已主动延展过：只保留 icon，等用户点
     var ms = window.DEMO_DWELL_MS;
     if (ms == null) ms = 2000;
     if (ms <= 0) return;
@@ -454,7 +472,7 @@
       : '';
     dwellTimer = setTimeout(function () {
       dwellTimer = null;
-      if (!cur || cur.tab !== tab || barEl || playing) return;
+      if (!cur || cur.tab !== tab || barEl || playing || hasLiteOffered) return;
       var rg = tab.doc.selRange;
       if (!rg) return;
       var keyNow = rg.r1 + ':' + rg.c1 + ':' + rg.r2 + ':' + rg.c2;
@@ -464,21 +482,75 @@
     }, ms);
   }
 
-  function closeLiteRec() {
+  function closeLiteRec(restoreIcon) {
+    clearLiteHold();
     if (liteRecEl) { liteRecEl.remove(); liteRecEl = null; }
+    if (restoreIcon && tblBtnEl) tblBtnEl.style.display = '';
+  }
+
+  function scheduleLiteCollapse(tab, ctx) {
+    clearLiteHold();
+    var ms = holdMs();
+    if (ms <= 0) return;
+    liteRemainMs = ms;
+    liteHoldStartedAt = Date.now();
+    liteHoldTimer = setTimeout(function () {
+      liteHoldTimer = null;
+      if (!liteRecEl || barEl) return;
+      hasLiteOffered = true;
+      closeLiteRec(true); // 收回为 icon
+      if (tblBtnEl) {
+        var btn = tblBtnEl.querySelector('.lui-et-entry');
+        if (btn) btn.setAttribute('data-rec-ready', '1');
+      }
+    }, ms);
+  }
+
+  function pauseLiteCollapse() {
+    if (!liteHoldTimer || litePaused) return;
+    litePaused = true;
+    clearTimeout(liteHoldTimer); liteHoldTimer = null;
+    liteRemainMs = Math.max(0, liteRemainMs - (Date.now() - liteHoldStartedAt));
+  }
+  function resumeLiteCollapse(tab, ctx) {
+    if (!litePaused || !liteRecEl) return;
+    litePaused = false;
+    if (liteRemainMs <= 0) {
+      hasLiteOffered = true;
+      closeLiteRec(true);
+      return;
+    }
+    liteHoldStartedAt = Date.now();
+    liteHoldTimer = setTimeout(function () {
+      liteHoldTimer = null;
+      if (!liteRecEl || barEl) return;
+      hasLiteOffered = true;
+      closeLiteRec(true);
+      if (tblBtnEl) {
+        var btn = tblBtnEl.querySelector('.lui-et-entry');
+        if (btn) btn.setAttribute('data-rec-ready', '1');
+      }
+    }, liteRemainMs);
   }
 
   function showLiteRec(tab, ctx) {
-    closeLiteRec();
+    closeLiteRec(false);
+    closeHoverTip();
     if (!ctx || ctx.type !== 'cells') return;
     var pool = recPoolForContext(ctx).lite || [];
     if (!pool.length) return;
+    lastLitePool = pool.slice();
+    /* 同一载体：隐藏独立 icon，在其位置延展成长条（左侧保留 logo） */
     var anchor = (tblBtnEl && tblBtnEl.getBoundingClientRect()) || ctx.rect;
+    if (tblBtnEl) tblBtnEl.style.display = 'none';
     liteRecEl = el(
-      '<div class="lui-lite-rec" role="listbox" aria-label="选区轻量推荐">' +
+      '<div class="lui-lite-rec is-morph" role="listbox" aria-label="选区轻量推荐">' +
+        '<button type="button" class="lui-lite-logo" title="展开完整推荐与输入" aria-label="展开">' +
+          icon('lingxi_logo_m', 16) +
+        '</button>' +
         '<div class="lui-lite-rec-items">' +
           pool.map(function (it, i) {
-            return '<button type="button" class="lui-lite-item" data-i="' + i + '" data-type="' + esc(it.contentType || '') + '">' +
+            return '<button type="button" class="lui-lite-item" data-i="' + i + '" data-type="' + esc(it.contentType || '') + '" title="' + esc(it.label) + '">' +
               '<span class="lui-lite-type">' + esc(contentTypeTag(it.contentType) || it.short || '') + '</span>' +
               '<span class="lui-lite-label">' + esc(it.label) + '</span>' +
             '</button>';
@@ -487,23 +559,27 @@
         '<button type="button" class="lui-lite-expand" title="展开完整推荐与输入">展开</button>' +
       '</div>');
     document.body.appendChild(liteRecEl);
-    var left = Math.max(8, Math.min((anchor.left || anchor.right || 0), window.innerWidth - liteRecEl.offsetWidth - 8));
-    var top = (anchor.bottom || 0) + 8;
-    if (top + liteRecEl.offsetHeight > window.innerHeight - 8) top = Math.max(8, (anchor.top || 0) - liteRecEl.offsetHeight - 8);
+    var left = Math.max(8, Math.min((anchor.left || 0), window.innerWidth - liteRecEl.offsetWidth - 8));
+    var top = Math.max(8, Math.min((anchor.top || 0), window.innerHeight - liteRecEl.offsetHeight - 8));
     liteRecEl.style.left = left + 'px';
     liteRecEl.style.top = top + 'px';
     liteRecEl.addEventListener('mousedown', function (e) { e.preventDefault(); });
-    liteRecEl.querySelector('.lui-lite-expand').addEventListener('click', function () {
-      closeLiteRec();
-      openBar(ctx, '');
-    });
+    liteRecEl.addEventListener('mouseenter', pauseLiteCollapse);
+    liteRecEl.addEventListener('mouseleave', function () { resumeLiteCollapse(tab, ctx); });
+    function goFull(pre) {
+      hasLiteOffered = true;
+      closeLiteRec(false);
+      if (pre) adoptRecItem(ctx, pre, true);
+      else openBar(ctx, '');
+    }
+    liteRecEl.querySelector('.lui-lite-expand').addEventListener('click', function () { goFull(null); });
+    liteRecEl.querySelector('.lui-lite-logo').addEventListener('click', function () { goFull(null); });
     Array.prototype.forEach.call(liteRecEl.querySelectorAll('.lui-lite-item'), function (btn) {
       btn.addEventListener('click', function () {
-        var item = pool[+btn.getAttribute('data-i')];
-        closeLiteRec();
-        adoptRecItem(ctx, item, true); // true=从轻量进入，需要时可展开完整面板
+        goFull(pool[+btn.getAttribute('data-i')]);
       });
     });
+    scheduleLiteCollapse(tab, ctx);
   }
 
   function adoptRecItem(ctx, item, fromLite) {
@@ -547,6 +623,10 @@
   LUI.onEtSelectionChanged = function (tab) {
     if (!cur || cur.tab !== tab || tab.type !== 'et') return;
     clearDwellTimer();
+    clearLiteHold();
+    closeLiteRec(false);
+    hasLiteOffered = false;
+    lastLitePool = [];
     closeTblBtn(); closeObjMenu(); closeHoverTip();
     var ctx = Editors.getContext(tab);
     var key = etContextKey(ctx);
@@ -669,7 +749,23 @@
   }
 
   function etIconEntryHtml() {
-    return '<button type="button" class="lui-ai-btn lui-et-entry" aria-label="AI 编辑">' + icon('lingxi_logo_m', 16) + '</button>';
+    return '<button type="button" class="lui-ai-btn lui-et-entry" aria-label="选区助手" data-rec-ready="0">' + icon('lingxi_logo_m', 16) + '</button>';
+  }
+
+  function entryHoverCopy(anchor) {
+    var ready = hasLiteOffered || (anchor && anchor.getAttribute('data-rec-ready') === '1');
+    if (ready && lastLitePool.length) {
+      var top = lastLitePool[0];
+      var tag = contentTypeTag(top.contentType) || top.short || '推荐';
+      return {
+        title: '展开推荐与输入',
+        desc: tag + ' · ' + top.label + (lastLitePool.length > 1 ? ' 等' : '') + '。点此打开完整面板'
+      };
+    }
+    return {
+      title: '选区助手',
+      desc: '选中后，按这块内容给出可做的事（推荐与编辑）'
+    };
   }
 
   function setEtEntryEnabled(on) {
@@ -693,13 +789,14 @@
       if (hoverTipEl && !hoverTipEl.matches(':hover') && !anchor.matches(':hover')) closeHoverTip();
     }, 200); };
     anchor.addEventListener('mouseenter', function () {
-      if (hoverTimer || hoverTipEl) return;
+      if (hoverTimer || hoverTipEl || liteRecEl) return; // 长条展示中不叠 tip
       hoverTimer = setTimeout(function () {
         hoverTimer = null;
-        if (!anchor.isConnected) return;
+        if (!anchor.isConnected || liteRecEl) return;
+        var copy = entryHoverCopy(anchor);
         hoverTipEl = el('<div class="lui-entry-tip" role="tooltip">' +
-          '<div class="lui-entry-tip-title">AI 编辑</div>' +
-          '<div class="lui-entry-tip-desc">选中区域后，用一句话告诉 AI 要做什么</div>' +
+          '<div class="lui-entry-tip-title">' + esc(copy.title) + '</div>' +
+          '<div class="lui-entry-tip-desc">' + esc(copy.desc) + '</div>' +
           '<div class="lui-entry-tip-sep"></div>' +
           '<div class="lui-entry-setting">' + icon('setup', 16) + '<span>设置</span>' + icon('arrow_right_s', 12) +
             '<div class="lui-entry-submenu"><button type="button" data-close-et-entry>关闭快捷入口</button>' +
@@ -751,7 +848,7 @@
     settingsEl = el('<div class="lui-et-settings" role="region" aria-label="WPS AI 设置">' +
       '<div class="lui-et-settings-head"><span>WPS AI 设置</span><button type="button" aria-label="关闭">' + icon('symbol_cross_two', 16) + '</button></div>' +
       '<div class="lui-et-settings-subtitle">AI 表格助手</div>' +
-      '<div class="lui-et-setting-row"><span><b>显示 AI 快捷入口</b><small>选中单元格或图表后显示</small></span>' +
+      '<div class="lui-et-setting-row"><span><b>显示选区推荐与编辑入口</b><small>选中单元格或图表后显示</small></span>' +
         '<button type="button" class="lui-setting-switch' + (storedOn(ET_ENTRY_SETTING) ? ' is-on' : '') + '" data-setting="entry" role="switch" aria-checked="' + storedOn(ET_ENTRY_SETTING) + '"><i></i></button></div>' +
       '<div class="lui-et-setting-row"><span><b>Ctrl + Ctrl 快捷唤起</b><small>在画布内打开输入框</small></span>' +
         '<button type="button" class="lui-setting-switch' + (storedOn(ET_SHORTCUT_SETTING) ? ' is-on' : '') + '" data-setting="shortcut" role="switch" aria-checked="' + storedOn(ET_SHORTCUT_SETTING) + '"><i></i></button></div></div>');
@@ -834,8 +931,12 @@
       Editors.setKeepSel(cur.tab, ctx.spans, true);
       keepSelRef = ctx.spans;
     }
+    clearDwellTimer();
+    clearLiteHold();
+    closeLiteRec(false);
     var chips = opts.bare ? null : chipsForContext(ctx);
-    if (chips && !chips.length) chips = null; // 该场景无推荐 → chips 区整体不渲染
+    if (chips && !chips.length) chips = null;
+    var showExtras = cur.tab.type === 'et' && ctx.type === 'cells' && !opts.bare;
     var etSettingsButton = cur.tab.type === 'et'
       ? '<button type="button" class="lui-bar-settings" aria-label="WPS AI 设置">' + icon('setup', 16) + '</button>' : '';
     barEl = el(
@@ -848,15 +949,24 @@
           '<button type="button" class="lui-bar-send" title="发送" aria-label="发送" disabled>' + icon('paper_plane', 16) + '</button>' +
         '</div>' +
         (chips || etSettingsButton ? '<div class="lui-chips-row">' + (chips ? '<div class="lui-chips"></div>' : '<div></div>') + etSettingsButton + '</div>' : '') +
+        (showExtras
+          ? '<div class="lui-extra-rec" data-panel="frequent">' +
+              '<div class="lui-extra-tabs">' +
+                '<button type="button" class="lui-extra-tab is-on" data-tab="frequent">常用</button>' +
+                '<button type="button" class="lui-extra-tab" data-tab="favorite">收藏</button>' +
+              '</div>' +
+              '<div class="lui-extra-list" data-list="frequent"></div>' +
+              '<div class="lui-extra-list" data-list="favorite" hidden></div>' +
+            '</div>'
+          : '') +
       '</div>');
     document.body.appendChild(barEl);
-    if (opts.cover) placeCover(barEl, opts.cover); // 覆盖在锚元素位置（补充要求覆盖决策条）
+    if (opts.cover) placeCover(barEl, opts.cover);
     else if (cur.tab.type === 'et' && ctx.type === 'chart') placeChartBar(barEl, ctx.rect);
-    else placeFixed(barEl, ctx.rect, !!opts.above); // 默认放选区/光标下方；opts.above=锚上方（缩略图整页入口）
+    else placeFixed(barEl, ctx.rect, !!opts.above);
 
     var input = barEl.querySelector('.lui-bar-input');
     var sendBtn = barEl.querySelector('.lui-bar-send');
-    // 光标态唤起（双击 Ctrl/Cmd 等）：焦点进输入框后文内光标看不见，在唤起位置放一个闪烁光标标记
     if (ctx.type === 'cursor' && cur.tab.type === 'wps' && ctx.rect) {
       caretEl = el('<span class="lui-caret-blink"></span>');
       caretEl.style.left = ctx.rect.left + 'px';
@@ -873,10 +983,10 @@
     input.select();
 
     var backBtn = barEl.querySelector('.lui-bar-back');
-    if (backBtn) backBtn.addEventListener('click', function () { closeBar(); opts.onBack(); }); // 返回：不发送、不改动
+    if (backBtn) backBtn.addEventListener('click', function () { closeBar(); opts.onBack(); });
     input.addEventListener('input', function () { sendBtn.disabled = !input.value.trim(); autoGrowInput(input); });
     input.addEventListener('keydown', function (e) {
-      if (e.key === 'Enter' && !e.shiftKey && !e.isComposing && input.value.trim()) { // Shift+Enter 换行；isComposing 防中文输入法误发
+      if (e.key === 'Enter' && !e.shiftKey && !e.isComposing && input.value.trim()) {
         e.preventDefault();
         submit(ctx, input.value.trim());
       } else if (e.key === 'Tab' && !e.shiftKey && chips) {
@@ -887,11 +997,53 @@
     sendBtn.addEventListener('click', function () { if (input.value.trim()) submit(ctx, input.value.trim()); });
 
     if (chips) paintChips(barEl.querySelector('.lui-chips'), chips, ctx, input, sendBtn);
+    if (showExtras) paintExtraRec(barEl.querySelector('.lui-extra-rec'), ctx, input, sendBtn);
     var settingsBtn = barEl.querySelector('.lui-bar-settings');
     if (settingsBtn) {
       setupEtSettingsHover(settingsBtn);
       settingsBtn.addEventListener('click', showEtSettings);
     }
+  }
+
+  function paintExtraRec(box, ctx, input, sendBtn) {
+    if (!box) return;
+    var frequent = [
+      { label: '整理选中数据', prompt: '帮我整理选中的数据' },
+      { label: '按条件高亮异常', prompt: '按条件标记数据，找出选中区域中的异常值并突出显示' },
+      { label: '汇总本列数值', prompt: '对选中列做汇总统计，给出合计与均值' }
+    ];
+    var favorite = [
+      { label: '套用费用台账模板', prompt: '【模板】费用台账模板' },
+      { label: '表头强调样式', prompt: '【样式】表头强调样式 · 加粗表头、冻结首行' }
+    ];
+    function fill(listName, items) {
+      var list = box.querySelector('[data-list="' + listName + '"]');
+      if (!list) return;
+      list.innerHTML = items.map(function (it, i) {
+        return '<button type="button" class="lui-extra-item" data-i="' + i + '">' + esc(it.label) + '</button>';
+      }).join('') || '<span class="lui-extra-empty">暂无，用过后会出现在这里</span>';
+      Array.prototype.forEach.call(list.querySelectorAll('.lui-extra-item'), function (btn) {
+        btn.addEventListener('click', function () {
+          var it = items[+btn.getAttribute('data-i')];
+          input.value = it.prompt || it.label;
+          sendBtn.disabled = !input.value.trim();
+          input.focus();
+          input.setSelectionRange(input.value.length, input.value.length);
+        });
+      });
+    }
+    fill('frequent', frequent);
+    fill('favorite', favorite);
+    Array.prototype.forEach.call(box.querySelectorAll('.lui-extra-tab'), function (tab) {
+      tab.addEventListener('click', function () {
+        Array.prototype.forEach.call(box.querySelectorAll('.lui-extra-tab'), function (x) { x.classList.remove('is-on'); });
+        tab.classList.add('is-on');
+        var name = tab.getAttribute('data-tab');
+        Array.prototype.forEach.call(box.querySelectorAll('.lui-extra-list'), function (list) {
+          list.hidden = list.getAttribute('data-list') !== name;
+        });
+      });
+    });
   }
 
   function autoGrowInput(input) {
@@ -1375,7 +1527,7 @@
   function closeMenu() { if (menuEl) { menuEl.remove(); menuEl = null; } }
   function closeObjMenu() { closeHoverTip(); if (objMenuEl) { objMenuEl.remove(); objMenuEl = null; } }
   function closeTblBtn() {
-    clearDwellTimer(); closeLiteRec(); closeHoverTip();
+    clearDwellTimer(); clearLiteHold(); closeLiteRec(false); closeHoverTip();
     if (tblBtnEl) { tblBtnEl.remove(); tblBtnEl = null; }
   }
   function closeBar(reason) {
